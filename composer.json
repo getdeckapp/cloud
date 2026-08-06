@@ -1,0 +1,89 @@
+{
+    "name": "deck/cloud",
+    "description": "The Deck Cloud agent: streams job-execution observability, worker snapshots, and remote command handling to Deck Cloud. Database-free; install alone for a slim agent or with deck/deck for the full dashboard.",
+    "keywords": [
+        "laravel",
+        "queue",
+        "jobs",
+        "deck",
+        "observability"
+    ],
+    "homepage": "https://github.com/getdeckapp/cloud",
+    "license": "MIT",
+    "support": {
+        "issues": "https://github.com/getdeckapp/cloud/issues",
+        "source": "https://github.com/getdeckapp/cloud"
+    },
+    "authors": [
+        {
+            "name": "Tor Morten Jensen",
+            "email": "tormorten@tormorten.no",
+            "role": "Developer"
+        }
+    ],
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../core"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "deck/core": "*",
+        "illuminate/console": "^11.0||^12.0||^13.0",
+        "illuminate/contracts": "^11.0||^12.0||^13.0",
+        "illuminate/http": "^11.0||^12.0||^13.0",
+        "illuminate/queue": "^11.0||^12.0||^13.0",
+        "illuminate/support": "^11.0||^12.0||^13.0"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.14",
+        "larastan/larastan": "^3.0",
+        "nunomaduro/collision": "^8.8",
+        "orchestra/testbench": "^9.0||^10.0.0||^11.0.0",
+        "pestphp/pest": "^4.0",
+        "pestphp/pest-plugin-arch": "^4.0",
+        "pestphp/pest-plugin-laravel": "^4.0",
+        "phpstan/extension-installer": "^1.4",
+        "phpstan/phpstan-deprecation-rules": "^2.0",
+        "phpstan/phpstan-phpunit": "^2.0"
+    },
+    "suggest": {
+        "laravel/horizon": "Recommended for Redis queues: richer worker snapshots and failed-job retry from the agent."
+    },
+    "autoload": {
+        "psr-4": {
+            "Deck\\Cloud\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Deck\\Cloud\\Tests\\": "tests/"
+        },
+        "files": [
+            "stubs/horizon.stub"
+        ]
+    },
+    "scripts": {
+        "analyse": "vendor/bin/phpstan analyse",
+        "test": "vendor/bin/pest",
+        "test-coverage": "vendor/bin/pest --coverage",
+        "format": "vendor/bin/pint"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "phpstan/extension-installer": true
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Deck\\Cloud\\DeckCloudServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
