@@ -1,0 +1,106 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve next release
+        id: release
+        run: |
+          if [ "${{ github.event.head_commit.message }}" = "Update CHANGELOG" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping release for changelog maintenance commit."
+            exit 0
+          fi
+
+          git fetch --tags --force
+
+          # Version lines are branch-scoped: a `vN` branch releases the N.x line
+          # (and waits for that line to be seeded by a manual N.0.0 tag), while a
+          # default branch (main/master) uses the newest tag overall, seeding
+          # 1.0.0 on the very first release.
+          BRANCH="${GITHUB_REF_NAME}"
+          ALL_VERSIONS=$(git tag -l | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n)
+
+          if [[ "$BRANCH" =~ ^v([0-9]+)$ ]]; then
+            MAJOR="${BASH_REMATCH[1]}"
+            LINE_VERSIONS=$(echo "$ALL_VERSIONS" | grep -E "^${MAJOR}\." || true)
+
+            if [ -z "$LINE_VERSIONS" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "No ${MAJOR}.x tag yet — tag ${MAJOR}.0.0 manually to seed this line."
+              exit 0
+            fi
+
+            LATEST_VERSION=$(echo "$LINE_VERSIONS" | tail -n1)
+          else
+            LATEST_VERSION=$(echo "$ALL_VERSIONS" | tail -n1)
+          fi
+
+          if [ -n "$LATEST_VERSION" ]; then
+            PREVIOUS_TAG=$(git tag -l | grep -E "^(v)?${LATEST_VERSION}$" | head -n1)
+            TAG_COMMIT=$(git rev-parse "${PREVIOUS_TAG}^{commit}")
+
+            if [ "$(git rev-parse HEAD)" = "$TAG_COMMIT" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "HEAD is already released as ${PREVIOUS_TAG}."
+              exit 0
+            fi
+
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST_VERSION"
+            PATCH=$((PATCH + 1))
+            VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          else
+            VERSION="1.0.0"
+            PREVIOUS_TAG=""
+          fi
+
+          NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+
+          {
+            echo "## Changes"
+            echo
+            if [ -n "$PREVIOUS_TAG" ]; then
+              git log "${PREVIOUS_TAG}..HEAD" --pretty=format:'- %s (%h)' --no-merges
+            else
+              echo "- Initial release"
+            fi
+          } > "$NOTES_FILE"
+
+          if [ ! -s "$NOTES_FILE" ]; then
+            echo "Automated release." > "$NOTES_FILE"
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "notes_file=${NOTES_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        if: steps.release.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.release.outputs.version }}
+          name: ${{ steps.release.outputs.version }}
+          body_path: ${{ steps.release.outputs.notes_file }}
+          draft: false
+          prerelease: false
+          generate_release_notes: false
