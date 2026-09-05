@@ -5,6 +5,7 @@ namespace Deck\Cloud\Workers;
 use Composer\InstalledVersions;
 use Deck\Core\Horizon\DeckHorizon;
 use Deck\Core\Horizon\HorizonSnapshot;
+use Deck\Core\Pausing\QueuePause;
 use Laravel\Horizon\Contracts\MetricsRepository;
 use Laravel\Horizon\Contracts\SupervisorRepository;
 use Laravel\Horizon\Contracts\WorkloadRepository;
@@ -72,7 +73,7 @@ class WorkerSnapshotCollector
                 horizonStatus: 'running',
                 processes: 1,
                 hostname: $this->hostname(),
-                paused: false,
+                paused: QueuePause::isPaused($connection !== '' ? $connection : 'redis', $this->defaultQueueName()),
                 meta: $this->metaForConnection($connection),
             );
         }
@@ -106,7 +107,7 @@ class WorkerSnapshotCollector
                 processes: 1,
                 hostname: $this->hostname(),
                 pid: $this->pid(),
-                paused: false,
+                paused: QueuePause::isPaused($connection, $queue),
                 meta: $this->metaForConnection($connection),
             ),
         ];
@@ -194,7 +195,7 @@ class WorkerSnapshotCollector
                     jobsPerMinute: $this->jobsPerMinuteForQueue($metrics, $connection.':'.$queue),
                     hostname: $hostname,
                     pid: $pid,
-                    paused: $paused,
+                    paused: $paused || QueuePause::isPaused($connection, $queue),
                     meta: $this->metaForConnection($connection),
                 );
 
@@ -215,7 +216,7 @@ class WorkerSnapshotCollector
                     jobsPerMinute: $this->jobsPerMinuteForQueue($metrics, (string) $queueKey),
                     hostname: $hostname,
                     pid: $pid,
-                    paused: $paused,
+                    paused: $paused || QueuePause::isPaused($connection, $queue),
                     meta: $this->metaForConnection($connection),
                 );
             }
@@ -241,7 +242,7 @@ class WorkerSnapshotCollector
         ?bool $paused = null,
         ?array $meta = null,
     ): WorkerSnapshot {
-        $status = $this->mapStatus($horizonStatus, $processes);
+        $status = $this->mapStatus($horizonStatus, $processes, $paused === true);
 
         return new WorkerSnapshot(
             supervisor: $supervisor,
@@ -277,13 +278,13 @@ class WorkerSnapshotCollector
         ];
     }
 
-    private function mapStatus(string $horizonStatus, int $processes): string
+    private function mapStatus(string $horizonStatus, int $processes, bool $deckPaused = false): string
     {
         if ($processes === 0) {
             return 'stopped';
         }
 
-        if ($horizonStatus === 'paused') {
+        if ($horizonStatus === 'paused' || $deckPaused) {
             return 'paused';
         }
 

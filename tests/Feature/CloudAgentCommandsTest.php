@@ -7,6 +7,9 @@ use Deck\Cloud\DeckCloud;
 use Deck\Cloud\Tests\Fixtures\SuccessfulTestJob;
 use Deck\Core\Blocking\JobClassBlock;
 use Deck\Core\Cancellation\JobCancellation;
+use Deck\Core\Pausing\QueuePause;
+use Illuminate\Queue\Events\Looping;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 
 /*
@@ -318,4 +321,60 @@ it('applies retry execution commands using payload context', function () {
     Http::assertSent(fn ($request) => $request->url() === 'https://cloud.deck.test/api/v1/agent/commands/ack'
         && $request['results'][0]['id'] === 'cmd_retry_1'
         && in_array($request['results'][0]['status'], ['applied', 'failed'], true));
+});
+
+it('applies pause queue commands and holds workers on that queue idle', function () {
+    fakeAgentCommand('cmd_pause_1', 'pause_queue', [
+        'connection' => 'redis',
+        'queue' => 'default',
+        'reason' => 'Draining before deploy',
+    ]);
+
+    app(CommandPoller::class)->poll();
+
+    expect(QueuePause::isPaused('redis', 'default'))->toBeTrue()
+        ->and(QueuePause::audit('redis', 'default')?->reason)->toBe('Draining before deploy')
+        ->and(Event::until(new Looping('redis', 'default')))->toBeFalse()
+        ->and(Event::until(new Looping('redis', 'emails')))->toBeNull()
+        ->and(ackStatus())->toBe('applied');
+});
+
+it('applies resume queue commands and releases the workers', function () {
+    QueuePause::pause('redis', 'default');
+
+    fakeAgentCommand('cmd_resume_1', 'resume_queue', [
+        'connection' => 'redis',
+        'queue' => 'default',
+    ]);
+
+    app(CommandPoller::class)->poll();
+
+    expect(QueuePause::isPaused('redis', 'default'))->toBeFalse()
+        ->and(Event::until(new Looping('redis', 'default')))->toBeNull()
+        ->and(ackStatus())->toBe('applied');
+});
+
+it('acks pause and resume as applied even when already in that state', function () {
+    fakeAgentCommand('cmd_resume_idle', 'resume_queue', [
+        'connection' => 'redis',
+        'queue' => 'default',
+    ]);
+
+    app(CommandPoller::class)->poll();
+
+    expect(ackStatus())->toBe('applied');
+});
+
+it('acks failed for pause queue commands missing the queue identity', function () {
+    fakeAgentCommand('cmd_pause_bad', 'pause_queue', [
+        'connection' => 'redis',
+    ]);
+
+    app(CommandPoller::class)->poll();
+
+    Http::assertSent(fn ($request) => $request->url() === 'https://cloud.deck.test/api/v1/agent/commands/ack'
+        && $request['results'][0]['status'] === 'failed'
+        && str_contains($request['results'][0]['message'], 'Missing connection or queue'));
+
+    expect(QueuePause::isPaused('redis', 'default'))->toBeFalse();
 });

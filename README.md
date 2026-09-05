@@ -20,9 +20,13 @@ this agent.
   worker snapshots.
 - **Remote commands** — `deck:poll-commands` pulls and applies commands from Deck
   Cloud: cancel, force-cancel, cancel-pending, block / unblock a job class,
-  cancel-all-running-for-class, and retry. Every command is applied through
-  cache/queue primitives using context carried on the command payload, so it
-  works with **no local database**.
+  cancel-all-running-for-class, retry, and pause / resume a queue. Every command
+  is applied through cache/queue primitives using context carried on the command
+  payload, so it works with **no local database**.
+- **Queue pause** — `pause_queue` sets a cache flag for `connection:queue`; every
+  worker serving that queue (plain `queue:work` or a Horizon process) idles at
+  the top of its loop until `resume_queue` clears it. Jobs stay queued, nothing
+  is released or retried, and worker snapshots report the queue as paused.
 
 ## Requirements
 

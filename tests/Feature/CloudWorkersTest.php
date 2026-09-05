@@ -7,6 +7,7 @@ use Deck\Cloud\Workers\WorkerReporter;
 use Deck\Cloud\Workers\WorkerSnapshot;
 use Deck\Cloud\Workers\WorkerSnapshotCollector;
 use Deck\Core\Horizon\HorizonSnapshot;
+use Deck\Core\Pausing\QueuePause;
 use Illuminate\Queue\Events\Looping;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
@@ -320,4 +321,32 @@ it('deck:report-workers exits 0 (not a scheduler failure) when there is nothing 
 
     expect($exitCode)->toBe(0)
         ->and($output)->toContain('Nothing to report');
+});
+
+it('reports a deck-paused queue as paused in collector snapshots', function () {
+    QueuePause::pause('redis', 'default', 'Draining before deploy');
+
+    $collector = app(WorkerSnapshotCollector::class);
+
+    $horizon = $collector->fromSupervisors([
+        (object) [
+            'name' => 'supervisor-1',
+            'pid' => 50,
+            'status' => 'running',
+            'processes' => ['redis:default' => 2, 'redis:emails' => 1],
+            'options' => ['connection' => 'redis', 'balance' => 'simple', 'memory' => 128],
+        ],
+    ]);
+
+    $byQueue = collect($horizon)->keyBy('queue');
+
+    expect($byQueue['default']->paused)->toBeTrue()
+        ->and($byQueue['default']->status)->toBe('paused')
+        ->and($byQueue['emails']->paused)->toBeFalse()
+        ->and($byQueue['emails']->status)->toBe('running');
+
+    $plain = $collector->collectFromQueueWorker('redis', 'default');
+
+    expect($plain[0]->paused)->toBeTrue()
+        ->and($plain[0]->status)->toBe('paused');
 });

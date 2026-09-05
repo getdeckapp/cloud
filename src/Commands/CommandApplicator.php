@@ -8,6 +8,7 @@ use Deck\Core\Cancellation\JobExecutionRetry;
 use Deck\Core\Cancellation\PendingJobCancellation;
 use Deck\Core\Data\JobExecutionRetryContext;
 use Deck\Core\Enums\JobExecutionStatus;
+use Deck\Core\Pausing\QueuePause;
 use Illuminate\Support\Carbon;
 
 /**
@@ -36,6 +37,8 @@ class CommandApplicator
             'unblock_class' => $this->unblockClass($command),
             'cancel_all_running_for_class' => $this->cancelAllRunningForClass($command),
             'retry_execution' => $this->retryExecution($command),
+            'pause_queue' => $this->pauseQueue($command),
+            'resume_queue' => $this->resumeQueue($command),
             default => $this->failed($command->id, 'Unknown command type: '.$command->type),
         };
     }
@@ -183,6 +186,43 @@ class CommandApplicator
         }
 
         return $this->failed($command->id, $result->message);
+    }
+
+    /**
+     * Pause a connection:queue. Workers serving it idle until resumed; jobs stay
+     * queued. Idempotent — re-pausing refreshes the flag (and reason) so Cloud's
+     * view converges on "paused" even if the flag was already set locally.
+     */
+    private function pauseQueue(AgentCommand $command): AgentCommandResult
+    {
+        $connection = $this->requiredString($command->payload, 'connection');
+        $queue = $this->requiredString($command->payload, 'queue');
+
+        if ($connection === null || $queue === null) {
+            return $this->failed($command->id, 'Missing connection or queue in command payload.');
+        }
+
+        QueuePause::pause($connection, $queue, $this->optionalString($command->payload, 'reason'));
+
+        return $this->applied($command->id);
+    }
+
+    /**
+     * Resume a connection:queue. Idempotent for the same reason as pause: a
+     * resume of an already-running queue is still the state Cloud asked for.
+     */
+    private function resumeQueue(AgentCommand $command): AgentCommandResult
+    {
+        $connection = $this->requiredString($command->payload, 'connection');
+        $queue = $this->requiredString($command->payload, 'queue');
+
+        if ($connection === null || $queue === null) {
+            return $this->failed($command->id, 'Missing connection or queue in command payload.');
+        }
+
+        QueuePause::resume($connection, $queue);
+
+        return $this->applied($command->id);
     }
 
     /**
